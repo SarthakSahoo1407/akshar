@@ -122,11 +122,24 @@ var Akshar = (_a) => {
   const [caretCoords, setCaretCoords] = (0, import_react.useState)({ top: 0, left: 0 });
   const [showSuggestions, setShowSuggestions] = (0, import_react.useState)(false);
   const [currentWordInfo, setCurrentWordInfo] = (0, import_react.useState)(null);
+  const [isMounted, setIsMounted] = (0, import_react.useState)(false);
+  const [isVisible, setIsVisible] = (0, import_react.useState)(false);
   const inputRef = (0, import_react.useRef)(null);
   const suggestionsRef = (0, import_react.useRef)(null);
   const abortControllerRef = (0, import_react.useRef)(null);
   const fetchTimeoutRef = (0, import_react.useRef)(null);
+  const animationTimeoutRef = (0, import_react.useRef)(null);
   const cacheRef = (0, import_react.useRef)({});
+  (0, import_react.useEffect)(() => {
+    if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
+    if (showSuggestions && options.length > 0) {
+      setIsMounted(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => setIsVisible(true)));
+    } else {
+      setIsVisible(false);
+      animationTimeoutRef.current = setTimeout(() => setIsMounted(false), 160);
+    }
+  }, [showSuggestions, options.length]);
   (0, import_react.useEffect)(() => {
     const handleClickOutside = (event) => {
       if (suggestionsRef.current && !suggestionsRef.current.contains(event.target) && inputRef.current && !inputRef.current.contains(event.target)) {
@@ -138,7 +151,7 @@ var Akshar = (_a) => {
   }, []);
   const fetchTransliteration = (0, import_react.useCallback)(
     async (word) => {
-      if (lang === "en" || !word.trim() || !/^[A-Za-z]+$/.test(word)) {
+      if (lang === "en" || !word.trim() || !/^[A-Za-z0-9]+$/.test(word)) {
         setOptions([]);
         setShowSuggestions(false);
         return;
@@ -149,6 +162,44 @@ var Akshar = (_a) => {
         setActiveItem(0);
         setShowSuggestions(cacheRef.current[cacheKey].length > 0);
         return;
+      }
+      let bestPrefix = null;
+      for (const k in cacheRef.current) {
+        const m = k.match(new RegExp(`^${lang}-(.+)-${maxOptions}$`));
+        if (m) {
+          const cachedWord = m[1];
+          if (word.startsWith(cachedWord)) {
+            if (!bestPrefix || cachedWord.length > bestPrefix.length) bestPrefix = cachedWord;
+          }
+        }
+      }
+      if (bestPrefix) {
+        const cachedOptions = cacheRef.current[`${lang}-${bestPrefix}-${maxOptions}`];
+        if (cachedOptions && cachedOptions.length > 0) {
+          setOptions(cachedOptions);
+          setActiveItem(0);
+          setShowSuggestions(true);
+          (async () => {
+            try {
+              if (abortControllerRef.current) abortControllerRef.current.abort();
+              abortControllerRef.current = new AbortController();
+              const res = await fetch(
+                `https://inputtools.google.com/request?text=${encodeURIComponent(word)}&itc=${lang}-t-i0-und&num=${maxOptions}&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage`,
+                { signal: abortControllerRef.current.signal }
+              );
+              const data = await res.json();
+              if (data[0] === "SUCCESS") {
+                const fetchedOptions = data[1][0][1];
+                cacheRef.current[cacheKey] = fetchedOptions;
+                setOptions(fetchedOptions);
+                setActiveItem(0);
+                setShowSuggestions(fetchedOptions.length > 0);
+              }
+            } catch (err) {
+            }
+          })();
+          return;
+        }
       }
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -209,7 +260,7 @@ var Akshar = (_a) => {
         if (wordInfo && lang !== "en") {
           fetchTimeoutRef.current = setTimeout(() => {
             fetchTransliteration(wordInfo.word);
-          }, 0);
+          }, 30);
         } else {
           setShowSuggestions(false);
           setOptions([]);
@@ -338,19 +389,20 @@ var Akshar = (_a) => {
       style: containerStyles
     },
     renderComponent(componentProps),
-    showSuggestions && options.length > 0 && !shouldHideSuggestions && /* @__PURE__ */ import_react.default.createElement(
+    isMounted && !shouldHideSuggestions && /* @__PURE__ */ import_react.default.createElement(
       "div",
       {
         ref: suggestionsRef,
-        className: "absolute bg-white border border-slate-200 shadow-xl rounded-lg overflow-hidden z-50 w-56 flex flex-col",
+        className: `absolute bg-white border border-slate-200 shadow-xl rounded-lg overflow-hidden z-50 w-56 flex flex-col
+            transition-[opacity,transform] duration-[140ms] ease-out origin-top-left
+            ${isVisible ? "opacity-100 translate-y-0 scale-100" : "opacity-0 -translate-y-1 scale-95 pointer-events-none"}`,
         style: { top: caretCoords.top, left: caretCoords.left }
       },
-      /* @__PURE__ */ import_react.default.createElement("div", { className: "bg-slate-50 border-b border-slate-100 px-3 py-1.5 flex justify-between items-center" }, /* @__PURE__ */ import_react.default.createElement("span", { className: "text-[10px] font-bold text-slate-400 uppercase tracking-wider" }, "Suggestions"), /* @__PURE__ */ import_react.default.createElement("span", { className: "text-[10px] text-blue-600 font-medium italic" }, lang && lang !== "en" ? lang.toUpperCase() : "HI")),
       /* @__PURE__ */ import_react.default.createElement("ul", { className: "py-1 m-0 p-0 list-none max-h-[250px] overflow-y-auto" }, options.map((option, index) => /* @__PURE__ */ import_react.default.createElement(
         "li",
         {
           key: index,
-          className: `px-3 py-2 flex justify-between items-center cursor-pointer transition-colors ${index === activeItem ? "bg-blue-600 text-white" : "hover:bg-slate-50 text-slate-700"}`,
+          className: `px-3 py-2 flex justify-between items-center cursor-pointer transition-[background-color,color] duration-100 ease-out ${index === activeItem ? "bg-blue-600 text-white" : "hover:bg-slate-50 text-slate-700"}`,
           style: index === activeItem ? activeItemStyles : {},
           onMouseDown: (e) => {
             e.preventDefault();
@@ -358,8 +410,7 @@ var Akshar = (_a) => {
           onClick: () => insertSuggestion(option, true),
           onMouseEnter: () => setActiveItem(index)
         },
-        /* @__PURE__ */ import_react.default.createElement("span", { className: "text-lg font-medium" }, option),
-        /* @__PURE__ */ import_react.default.createElement("span", { className: `text-[10px] ${index === activeItem ? "opacity-70" : "text-slate-400"}` }, index + 1)
+        /* @__PURE__ */ import_react.default.createElement("span", { className: "text-lg font-medium" }, option)
       )))
     )
   );

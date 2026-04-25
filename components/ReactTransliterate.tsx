@@ -69,11 +69,28 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [currentWordInfo, setCurrentWordInfo] = useState<{ word: string; start: number; end: number } | null>(null);
   
+  const [isMounted, setIsMounted] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+
   const inputRef = useRef<HTMLElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const animationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cacheRef = useRef<Record<string, string[]>>({});
+
+  // Drive enter / exit animation
+  useEffect(() => {
+    if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
+    if (showSuggestions && options.length > 0) {
+      setIsMounted(true);
+      // Two rAFs: first mounts the element, second triggers the CSS transition
+      requestAnimationFrame(() => requestAnimationFrame(() => setIsVisible(true)));
+    } else {
+      setIsVisible(false);
+      animationTimeoutRef.current = setTimeout(() => setIsMounted(false), 160);
+    }
+  }, [showSuggestions, options.length]);
 
   // Handle click outside to close suggestions
   useEffect(() => {
@@ -93,18 +110,64 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
 
   const fetchTransliteration = useCallback(
     async (word: string) => {
-      if (lang === 'en' || !word.trim() || !/^[A-Za-z]+$/.test(word)) {
+      // allow alphanumeric words so numbers are supported
+      if (lang === 'en' || !word.trim() || !/^[A-Za-z0-9]+$/.test(word)) {
         setOptions([]);
         setShowSuggestions(false);
         return;
       }
 
       const cacheKey = `${lang}-${word}-${maxOptions}`;
+
+      // Exact cache hit
       if (cacheRef.current[cacheKey]) {
         setOptions(cacheRef.current[cacheKey]);
         setActiveItem(0);
         setShowSuggestions(cacheRef.current[cacheKey].length > 0);
         return;
+      }
+
+      // Try longest cached prefix to serve suggestions instantly while we refresh in background
+      let bestPrefix: string | null = null;
+      for (const k in cacheRef.current) {
+        const m = k.match(new RegExp(`^${lang}-(.+)-${maxOptions}$`));
+        if (m) {
+          const cachedWord = m[1];
+          if (word.startsWith(cachedWord)) {
+            if (!bestPrefix || cachedWord.length > bestPrefix.length) bestPrefix = cachedWord;
+          }
+        }
+      }
+
+      if (bestPrefix) {
+        const cachedOptions = cacheRef.current[`${lang}-${bestPrefix}-${maxOptions}`];
+        if (cachedOptions && cachedOptions.length > 0) {
+          setOptions(cachedOptions);
+          setActiveItem(0);
+          setShowSuggestions(true);
+          // Fire-and-forget refresh for the full word
+          (async () => {
+            try {
+              if (abortControllerRef.current) abortControllerRef.current.abort();
+              abortControllerRef.current = new AbortController();
+              const res = await fetch(
+                `https://inputtools.google.com/request?text=${encodeURIComponent(word)}&itc=${lang}-t-i0-und&num=${maxOptions}&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage`,
+                { signal: abortControllerRef.current.signal }
+              );
+              const data = await res.json();
+              if (data[0] === 'SUCCESS') {
+                const fetchedOptions = data[1][0][1];
+                cacheRef.current[cacheKey] = fetchedOptions;
+                setOptions(fetchedOptions);
+                setActiveItem(0);
+                setShowSuggestions(fetchedOptions.length > 0);
+              }
+            } catch (err) {
+              // ignore aborts/errors for background refresh
+            }
+          })();
+          return;
+        }
       }
 
       if (abortControllerRef.current) {
@@ -177,10 +240,10 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
         }
 
         if (wordInfo && lang !== 'en') {
-          // Add a small debounce
+          // Small debounce to batch rapid typing; tuned for responsiveness
           fetchTimeoutRef.current = setTimeout(() => {
              fetchTransliteration(wordInfo.word);
-          }, 0);
+          }, 30);
         } else {
           setShowSuggestions(false);
           setOptions([]);
@@ -328,21 +391,23 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
     >
       {renderComponent(componentProps)}
 
-      {showSuggestions && options.length > 0 && !shouldHideSuggestions && (
+      {isMounted && !shouldHideSuggestions && (
         <div
           ref={suggestionsRef}
-          className="absolute bg-white border border-slate-200 shadow-xl rounded-lg overflow-hidden z-50 w-56 flex flex-col"
+          className={`absolute bg-white border border-slate-200 shadow-xl rounded-lg overflow-hidden z-50 w-56 flex flex-col
+            transition-[opacity,transform] duration-[140ms] ease-out origin-top-left
+            ${isVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 -translate-y-1 scale-95 pointer-events-none'}`}
           style={{ top: caretCoords.top, left: caretCoords.left }}
         >
-          <div className="bg-slate-50 border-b border-slate-100 px-3 py-1.5 flex justify-between items-center">
+          {/* <div className="bg-slate-50 border-b border-slate-100 px-3 py-1.5 flex justify-between items-center">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Suggestions</span>
             <span className="text-[10px] text-blue-600 font-medium italic">{(lang && lang !== 'en') ? lang.toUpperCase() : 'HI'}</span>
-          </div>
+          </div> */}
           <ul className="py-1 m-0 p-0 list-none max-h-[250px] overflow-y-auto">
             {options.map((option, index) => (
               <li
                 key={index}
-                className={`px-3 py-2 flex justify-between items-center cursor-pointer transition-colors ${
+                className={`px-3 py-2 flex justify-between items-center cursor-pointer transition-[background-color,color] duration-100 ease-out ${
                   index === activeItem ? 'bg-blue-600 text-white' : 'hover:bg-slate-50 text-slate-700'
                 }`}
                 style={index === activeItem ? activeItemStyles : {}}
@@ -354,7 +419,7 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
                 onMouseEnter={() => setActiveItem(index)}
               >
                 <span className="text-lg font-medium">{option}</span>
-                <span className={`text-[10px] ${index === activeItem ? 'opacity-70' : 'text-slate-400'}`}>{index + 1}</span>
+                {/* <span className={`text-[10px] ${index === activeItem ? 'opacity-70' : 'text-slate-400'}`}>{index + 1}</span> */}
               </li>
             ))}
           </ul>
