@@ -5,8 +5,8 @@
   <p>Indic transliteration for React — powered by Google Input Tools</p>
 
   <p>
-    <a href="https://www.npmjs.com/package/akshar"><img src="https://img.shields.io/npm/v/akshar?color=blue&style=flat-square" alt="npm version" /></a>
-    <a href="https://www.npmjs.com/package/akshar"><img src="https://img.shields.io/npm/dm/akshar?style=flat-square" alt="downloads" /></a>
+    <a href="https://www.npmjs.com/package/akshar-typing"><img src="https://img.shields.io/npm/v/akshar?color=blue&style=flat-square" alt="npm version" /></a>
+    <a href="https://www.npmjs.com/package/akshar-typing"><img src="https://img.shields.io/npm/dm/akshar?style=flat-square" alt="downloads" /></a>
     <a href="https://github.com/yourusername/akshar/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/akshar?style=flat-square" alt="MIT" /></a>
     <a href="https://bundlephobia.com/package/akshar"><img src="https://img.shields.io/bundlephobia/minzip/akshar?style=flat-square" alt="bundle size" /></a>
   </p>

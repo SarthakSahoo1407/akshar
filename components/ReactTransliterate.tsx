@@ -36,10 +36,13 @@ function getWordAroundCaret(text: string, caretPos: number) {
   if (match) {
     const wordStart = match.index || 0;
     const word = match[0];
+    // Extend end to cover the rest of the word after the caret
+    const afterMatch = text.substring(caretPos).match(/^[^ \n]+/);
+    const wordEnd = caretPos + (afterMatch ? afterMatch[0].length : 0);
     return {
       word,
       start: wordStart,
-      end: caretPos,
+      end: wordEnd,
     };
   }
   return null;
@@ -90,7 +93,7 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
 }) => {
   const [options, setOptions] = useState<string[]>([]);
   const [activeItem, setActiveItem] = useState(0);
-  const [caretCoords, setCaretCoords] = useState({ top: 0, left: 0 });
+  const [caretCoords, setCaretCoords] = useState({ top: 0, left: 0, containerWidth: 0 });
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [currentWordInfo, setCurrentWordInfo] = useState<{ word: string; start: number; end: number } | null>(null);
   
@@ -98,6 +101,7 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
   const [isVisible, setIsVisible] = useState(false);
 
   const inputRef = useRef<HTMLElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const fetchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -243,9 +247,11 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
     } catch(e) {}
 
     // We want the suggestions to appear just below the caret line
+    const containerWidth = containerRef.current?.offsetWidth ?? el.offsetWidth;
     setCaretCoords({
       top: coords.top + lineHeight + el.scrollTop + offsetY,
       left: coords.left + offsetX,
+      containerWidth,
     });
   }, [offsetX, offsetY]);
 
@@ -394,6 +400,11 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
   const isMobile = typeof window !== 'undefined' && window.innerWidth <= hideSuggestionBoxBreakpoint;
   const shouldHideSuggestions = hideSuggestionBoxOnMobileDevices && isMobile;
 
+  const flipLeft = caretCoords.containerWidth > 0 && caretCoords.left + 224 > caretCoords.containerWidth;
+  const suggestionBoxStyle = flipLeft
+    ? { top: caretCoords.top, right: caretCoords.containerWidth - caretCoords.left }
+    : { top: caretCoords.top, left: caretCoords.left };
+
   const rtlLangs: Language[] = ['ur'];
   const isRtl = rtlLangs.includes(lang);
 
@@ -417,7 +428,8 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
   };
 
   return (
-    <div 
+    <div
+      ref={containerRef}
       className={`relative flex w-full ${containerClassName}`} 
       style={containerStyles}
     >
@@ -428,9 +440,9 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
           ref={suggestionsRef}
           // z index higher
           className={`absolute bg-white border border-slate-200 shadow-xl rounded-lg overflow-hidden z-[9999] w-56 flex flex-col
-            transition-[opacity,transform] duration-[140ms] ease-out origin-top-left 
+            transition-[opacity,transform] duration-[140ms] ease-out ${flipLeft ? 'origin-top-right' : 'origin-top-left'}
             ${isVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 -translate-y-1 scale-95 pointer-events-none'}`}
-          style={{ top: caretCoords.top, left: caretCoords.left }}
+          style={suggestionBoxStyle}
         >
           {/* <div className="bg-slate-50 border-b border-slate-100 px-3 py-1.5 flex justify-between items-center">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Suggestions</span>
