@@ -45,6 +45,31 @@ function getWordAroundCaret(text: string, caretPos: number) {
   return null;
 }
 
+const PREF_KEY_PREFIX = 'akshar_pref_';
+
+function getPreferredSuggestion(lang: string, word: string): string | null {
+  try {
+    return localStorage.getItem(`${PREF_KEY_PREFIX}${lang}_${word.toLowerCase()}`);
+  } catch {
+    return null;
+  }
+}
+
+function savePreferredSuggestion(lang: string, word: string, suggestion: string): void {
+  try {
+    localStorage.setItem(`${PREF_KEY_PREFIX}${lang}_${word.toLowerCase()}`, suggestion);
+  } catch {
+    // localStorage not available (e.g. SSR or private browsing)
+  }
+}
+
+function reorderWithPreferred(options: string[], preferred: string | null): string[] {
+  if (!preferred) return options;
+  const idx = options.indexOf(preferred);
+  if (idx <= 0) return options;
+  return [preferred, ...options.slice(0, idx), ...options.slice(idx + 1)];
+}
+
 export const Akshar: React.FC<ReactTransliterateProps> = ({
   onChangeText,
   value,
@@ -121,9 +146,10 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
 
       // Exact cache hit
       if (cacheRef.current[cacheKey]) {
-        setOptions(cacheRef.current[cacheKey]);
+        const ordered = reorderWithPreferred(cacheRef.current[cacheKey], getPreferredSuggestion(lang, word));
+        setOptions(ordered);
         setActiveItem(0);
-        setShowSuggestions(cacheRef.current[cacheKey].length > 0);
+        setShowSuggestions(ordered.length > 0);
         return;
       }
 
@@ -142,7 +168,7 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
       if (bestPrefix) {
         const cachedOptions = cacheRef.current[`${lang}-${bestPrefix}-${maxOptions}`];
         if (cachedOptions && cachedOptions.length > 0) {
-          setOptions(cachedOptions);
+          setOptions(reorderWithPreferred(cachedOptions, getPreferredSuggestion(lang, word)));
           setActiveItem(0);
           setShowSuggestions(true);
           // Fire-and-forget refresh for the full word
@@ -158,7 +184,7 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
               if (data[0] === 'SUCCESS') {
                 const fetchedOptions = data[1][0][1];
                 cacheRef.current[cacheKey] = fetchedOptions;
-                setOptions(fetchedOptions);
+                setOptions(reorderWithPreferred(fetchedOptions, getPreferredSuggestion(lang, word)));
                 setActiveItem(0);
                 setShowSuggestions(fetchedOptions.length > 0);
               }
@@ -184,7 +210,7 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
         if (data[0] === 'SUCCESS') {
           const fetchedOptions = data[1][0][1];
           cacheRef.current[cacheKey] = fetchedOptions;
-          setOptions(fetchedOptions);
+          setOptions(reorderWithPreferred(fetchedOptions, getPreferredSuggestion(lang, word)));
           setActiveItem(0);
           setShowSuggestions(fetchedOptions.length > 0);
         }
@@ -243,7 +269,7 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
           // Small debounce to batch rapid typing; tuned for responsiveness
           fetchTimeoutRef.current = setTimeout(() => {
              fetchTransliteration(wordInfo.word);
-          }, 30);
+          }, 10);
         } else {
           setShowSuggestions(false);
           setOptions([]);
@@ -259,6 +285,8 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
   const insertSuggestion = (suggestion: string, triggerSpace = false, trailingPunctuation = '') => {
     if (!currentWordInfo || !inputRef.current) return;
     const el = inputRef.current as any;
+
+    savePreferredSuggestion(lang, currentWordInfo.word, suggestion);
 
     const before = value.substring(0, currentWordInfo.start);
     const after = value.substring(currentWordInfo.end);
@@ -366,10 +394,14 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
   const isMobile = typeof window !== 'undefined' && window.innerWidth <= hideSuggestionBoxBreakpoint;
   const shouldHideSuggestions = hideSuggestionBoxOnMobileDevices && isMobile;
 
+  const rtlLangs: Language[] = ['ur'];
+  const isRtl = rtlLangs.includes(lang);
+
   const componentProps = {
     ...rest,
     className,
     value,
+    dir: isRtl ? 'rtl' : undefined,
     onChange: handleInputChange,
     onKeyDown: handleInputKeyDown,
     onBlur: (e: React.FocusEvent) => {
@@ -394,8 +426,9 @@ export const Akshar: React.FC<ReactTransliterateProps> = ({
       {isMounted && !shouldHideSuggestions && (
         <div
           ref={suggestionsRef}
-          className={`absolute bg-white border border-slate-200 shadow-xl rounded-lg overflow-hidden z-50 w-56 flex flex-col
-            transition-[opacity,transform] duration-[140ms] ease-out origin-top-left
+          // z index higher
+          className={`absolute bg-white border border-slate-200 shadow-xl rounded-lg overflow-hidden z-[9999] w-56 flex flex-col
+            transition-[opacity,transform] duration-[140ms] ease-out origin-top-left 
             ${isVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 -translate-y-1 scale-95 pointer-events-none'}`}
           style={{ top: caretCoords.top, left: caretCoords.left }}
         >
